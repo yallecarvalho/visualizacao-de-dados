@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>ECharts Dashboard</title>
+  <!-- Importa a lib principal do ECharts -->
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <!-- Importa também o jQuery (se você usar $.get) -->
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<div id="mapChart" style="width: 100%; height: 500px;"></div>
+<div id="timeChart" style="width: 100%; height: 300px;"></div>
+
+<script>
+var mapChart = echarts.init(document.getElementById('mapChart'));
+var timeChart = echarts.init(document.getElementById('timeChart'));
+
+function createDashboard(worldGeo, rawData) {
+  echarts.registerMap('world', worldGeo);
+
+  var anos = Object.keys(rawData.BAL); // ["1997","1998",...]
+  var currentMetric = 'Exportações';
+  var totais = anos.map(ano => {
+    return rawData.BAL[ano].reduce((sum, d) => sum + d.us_value, 0);
+  });
+
+  function getYearData(ano) {
+  return rawData.BAL[ano].map(d => {
+    let value = 0;
+
+    if (currentMetric === 'Exportações') {
+      value = d.us_value < 0 ? Math.abs(d.us_value) : 0;
+    } else if (currentMetric === 'Importações') {
+      value = d.us_value > 0 ? d.us_value : 0;
+    } else if (currentMetric === 'Balança Comercial') {
+      value = d.kg_weight || 0;
+    }
+
+    return {
+      name: d.name,
+      value: Number((value / 1e9).toFixed(1)) 
+    };
+  });
+}
+
+
+  var optionMap = {
+    title: { text: 'Volume de '+ currentMetric + ' do Brasil (Ano ' + anos[0] + ')', subtext: `Dados do Monitor do Comércio Exterior Brasileiro`, left: 'center' },
+    
+    tooltip: { trigger: 'item',
+    formatter: function(params) {
+    if (params.value) {
+      return `${params.name}<br>US$ ${params.value.toFixed(1)} bi`;
+    } else {
+      return `${params.name}<br>Sem dados`;
+    }
+  }
+  },
+    visualMap: {
+      min: -33,
+      max: 33,
+      calculable: true,
+      inRange: { color: ['#d73027', '#f7f7f7', '#1a9850'] },
+      text: ['Volume negociado com o país (bilhões de US$)'], left: 'right',
+      textStyle: {
+        color: '#000'
+      }
+    },
+    
+    series: [{
+      type: 'map',
+      map: 'world',
+      roam: true,
+      data: getYearData(anos[0])
+    }]
+  };
+
+  function generateOptionTime(data) {
+    const optionTime = [];
+
+    for (const year in data) {
+        const yearData = data[year];
+
+        let exportValue = 0;
+        let importValue = 0;
+
+        yearData.forEach(name => {
+            if (name.us_value > 0) {
+                exportValue += name.us_value;
+            } else {
+                importValue += Math.abs(name.us_value);
+            }
+        });
+
+        const balanceValue = exportValue - importValue;
+
+        optionTime.push({
+            year: year,
+            export: Number((exportValue / 1e9).toFixed(1)),
+            import: Number((importValue / 1e9).toFixed(1)),
+            balance: Number((balanceValue / 1e9).toFixed(1))
+        });
+    }
+
+    return optionTime;
+  }
+
+
+  const optionTimeData = generateOptionTime(rawData.BAL);
+
+  const exportacoes = optionTimeData.map(d => d.export);
+  const importacoes = optionTimeData.map(d => d.import);
+  const balanca = optionTimeData.map(d => d.balance);
+
+  var optionTime = {
+  title: { text: 'Totais por ano', left: 'left' },
+  legend: {
+    data: ['Exportações', 'Importações', 'Balança Comercial'],
+    top: 30
+  },
+  tooltip: {
+    trigger: 'axis',
+    formatter: function(params) {
+      var ano = params[0].axisValue;
+      var exp = params.find(p => p.seriesName === 'Exportações')?.data.toFixed(1);
+      var imp = params.find(p => p.seriesName === 'Importações')?.data.toFixed(1);
+      var bal = params.find(p => p.seriesName === 'Balança Comercial')?.data.toFixed(1);
+      return `Ano ${ano}<br>
+              Total de Exportações do Brasil: US$ ${exp} bi<br>
+              Total de Importações do Brasil: US$ ${imp} bi <br>
+              Total de Balança Comercial do Brasil: US$ ${bal} bi`;
+    }
+  },
+  xAxis: { type: 'category', data: Object.keys(rawData.BAL) }, // anos
+  yAxis: { type: 'value',
+  min: -50,     
+  max: 350,     
+  interval: 50 },
+  series: [
+    { name: 'Exportações', type: 'line', data: exportacoes, itemStyle: { color: '#3182bd' } },
+    { name: 'Importações', type: 'line', data: importacoes, itemStyle: { color: '#e6550d' } },
+    { name: 'Balança Comercial', type: 'line', data: balanca, itemStyle: { color: '#31a354' } }
+  ]
+  };
+
+  mapChart.setOption(optionMap);
+  timeChart.setOption(optionTime);
+
+
+  echarts.connect([mapChart, timeChart]);
+
+
+  timeChart.on('click', function(params) {
+    var ano = params.name;
+    mapChart.setOption({
+      title: { text: 'Volume de ' + currentMetric + ' do Brasil (Ano ' + ano + ')' },
+      series: [{ data: getYearData(ano) }]
+    });
+  });
+}
+
+function fetchDataAndGeoJSON() {
+  mapChart.showLoading();
+  timeChart.showLoading();
+
+  Promise.all([
+    $.get('world.json'),
+    $.get('BR-exportacoes_importacoes_2025.json')
+  ]).then(function([worldGeo, rawData]) {
+    createDashboard(worldGeo, rawData);
+    mapChart.hideLoading();
+    timeChart.hideLoading();
+  });
+}
+
+fetchDataAndGeoJSON();
+</script>
+</body>
+</html>
